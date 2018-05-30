@@ -19,5 +19,6 @@ dependencies:
   - openy_media_image
   - path
   - taxonomy
+  - scheduler
   - user
   - views

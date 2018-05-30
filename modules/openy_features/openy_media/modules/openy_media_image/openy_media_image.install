@@ -255,3 +255,31 @@ function openy_media_image_update_8009() {
     }
   }
 }
+
+/**
+ * Enabling scheduler module..
+ */
+function openy_media_image_update_8010() {
+  $config_dir = drupal_get_path('module', 'openy_media_image') . '/config/install/';
+
+  // Update multiple configurations.
+  $configs = [
+    'core.entity_form_display.media.image.default' => [
+      'dependencies.module',
+      'content.publish_on',
+      'content.unpublish_on',
+    ],
+    'media_entity.bundle.image' => [
+      'dependencies.module',
+      'third_party_settings.scheduler',
+    ],
+  ];
+
+  $config_updater = \Drupal::service('openy_upgrade_tool.param_updater');
+  foreach ($configs as $config_name => $params) {
+    $config = $config_dir . $config_name . '.yml';
+    foreach ($params as $param) {
+      $config_updater->update($config, $config_name, $param);
+    }
+  }
+}

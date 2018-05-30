@@ -3,6 +3,19 @@ status: true
 dependencies:
   module:
     - media_entity_image
+    - scheduler
+third_party_settings:
+  scheduler:
+    expand_fieldset: when_required
+    fields_display_mode: vertical_tab
+    publish_enable: true
+    publish_past_date: error
+    publish_required: false
+    publish_revision: false
+    publish_touch: false
+    unpublish_enable: true
+    unpublish_required: false
+    unpublish_revision: false
 id: image
 label: Image
 description: 'Use Image for uploading locally hosted images.'

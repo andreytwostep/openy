@@ -11,6 +11,7 @@ dependencies:
   module:
     - focal_point
     - path
+    - scheduler
 id: media.image.default
 targetEntityType: media
 bundle: image
@@ -71,6 +72,21 @@ content:
     region: content
     settings: {  }
     third_party_settings: {  }
+  publish_on:
+    type: datetime_timestamp_no_default
+    weight: 30
+    settings: {  }
+    third_party_settings: {  }
+    region: content
+  scheduler_settings:
+    weight: 20
+    region: content
+  unpublish_on:
+    type: datetime_timestamp_no_default
+    weight: 30
+    settings: {  }
+    third_party_settings: {  }
+    region: content
 hidden:
   created: true
   uid: true
