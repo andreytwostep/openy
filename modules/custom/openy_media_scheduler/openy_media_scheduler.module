@@ -1,0 +1,185 @@
+<?php
+
+/**
+ * @file
+ * Contains openy_branch module hooks.
+ */
+
+use Drupal\Component\Utility\Xss;
+use Drupal\node\NodeInterface;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\openy_branch\Utility\UpdatesQueueProvisioner;
+
+/**
+ * Implements hook_form_FORM_ID_alter() for media_form().
+ */
+function openy_media_scheduler_form_media_form_alter(&$form, FormStateInterface $form_state) {
+  if (($bundle = $form_state->getFormObject()->getEntity()->bundle()) == 'image') {
+    $config = \Drupal::config('scheduler.settings');
+    $type = \Drupal::entityTypeManager()->getStorage('media_bundle')->load($bundle );
+    $publishing_enabled = $type->getThirdPartySetting('scheduler', 'publish_enable', $config->get('default_publish_enable'));
+    $unpublishing_enabled = $type->getThirdPartySetting('scheduler', 'unpublish_enable', $config->get('default_unpublish_enable'));
+
+    // If neither publishing nor unpublishing are enabled for this node type then
+    // the only thing to do is remove the fields from the form, then exit.
+    if (!$publishing_enabled && !$unpublishing_enabled) {
+      unset($form['publish_on']);
+      unset($form['unpublish_on']);
+      return;
+    }
+
+    $date_only_allowed = $config->get('allow_date_only');
+
+    /* @var $node \Drupal\node\NodeInterface */
+    $node = $form_state->getFormObject()->getEntity();
+
+    // A publish_on date is required if the content type option is set and the
+    // node is being created or it currently has a scheduled publishing date.
+    $publishing_required = $type->getThirdPartySetting('scheduler', 'publish_required', $config->get('default_publish_required'))
+      && ($node->isNew() || (!$node->isPublished() && !empty($node->publish_on->value)));
+
+    // An unpublish_on date is required if the content type option is set and the
+    // node is being created or the current status is published or the node is
+    // scheduled to be published.
+    $unpublishing_required = $type->getThirdPartySetting('scheduler', 'unpublish_required', $config->get('default_unpublish_required')) && ($node->isNew() || $node->isPublished() || !empty($node->publish_on->value));
+
+    // Create a 'details' field group to wrap the scheduling fields, and expand it
+    // if publishing or unpublishing is required, if a date already exists or the
+    // fieldset is configured to be always expanded.
+    $has_data = !empty($node->publish_on->value) || !empty($node->unpublish_on->value);
+    $always_expand = $type->getThirdPartySetting('scheduler', 'expand_fieldset', $config->get('default_expand_fieldset')) === 'always';
+    $expand_details = $publishing_required || $unpublishing_required || $has_data || $always_expand;
+
+    // Create the group for the fields.
+    $form['scheduler_settings'] = [
+      '#type' => 'details',
+      '#title' => t('Scheduling options'),
+      '#open' => $expand_details,
+      '#weight' => 35,
+      '#attributes' => ['class' => ['scheduler-form']],
+      '#optional' => FALSE,
+    ];
+
+    // Attach the fields to group.
+    $form['unpublish_on']['#group'] = 'scheduler_settings';
+    $form['publish_on']['#group'] = 'scheduler_settings';
+
+    // Show the field group as a vertical tab if this option is enabled.
+    $use_vertical_tabs = $type->getThirdPartySetting('scheduler', 'fields_display_mode', $config->get('default_fields_display_mode')) === 'vertical_tab';
+    if ($use_vertical_tabs) {
+      $form['scheduler_settings']['#group'] = 'advanced';
+
+      // Attach the javascript for the vertical tabs.
+      $form['scheduler_settings']['#attached']['library'][] = 'scheduler/vertical-tabs';
+    }
+
+    // Define the descriptions depending on whether the time can be skipped.
+    $date_formatter = \Drupal::service('date.formatter');
+    $descriptions = [];
+    if ($date_only_allowed) {
+      $descriptions['format'] = t('Enter a date. The time part is optional.');
+      // Show the default time so users know what they will get if they do not
+      // enter a time.
+      $default_time = strtotime($config->get('default_time'));
+      $descriptions['default'] = t('The default time is @default_time.', [
+        '@default_time' => $date_formatter->format($default_time, 'custom', 'H:i:s'),
+      ]);
+    }
+    else {
+      $descriptions['format'] = t('Enter a date and time.');
+    }
+
+    if (!$publishing_required) {
+      $descriptions['blank'] = t('Leave the date blank for no scheduled publishing.');
+    }
+
+    $form['publish_on']['#access'] = $publishing_enabled;
+    $form['publish_on']['widget'][0]['value']['#required'] = $publishing_required;
+    $form['publish_on']['widget'][0]['value']['#description'] = Xss::filter(implode(' ', $descriptions));
+
+    if (!$unpublishing_required) {
+      $descriptions['blank'] = t('Leave the date blank for no scheduled unpublishing.');
+    }
+    else {
+      unset($descriptions['blank']);
+    }
+
+    $form['unpublish_on']['#access'] = $unpublishing_enabled;
+    $form['unpublish_on']['widget'][0]['value']['#required'] = $unpublishing_required;
+    $form['unpublish_on']['widget'][0]['value']['#description'] = Xss::filter(implode(' ', $descriptions));
+
+    if (!\Drupal::currentUser()->hasPermission('schedule publishing of nodes')) {
+      // Do not show the scheduler fields for users who do not have permission.
+      $form['scheduler_settings']['#access'] = FALSE;
+
+      // @todo Find a more elegant solution for bypassing the validation of
+      // scheduler fields when the user does not have permission.
+      // @see https://www.drupal.org/node/2651448
+      $form['publish_on']['widget'][0]['value']['#required'] = FALSE;
+      $form['unpublish_on']['widget'][0]['value']['#required'] = FALSE;
+    }
+
+    // Check which widget type is set for the scheduler fields, and give a warning
+    // if the wrong one has been set and provide a hint and link to fix it.
+    $storage_form_display = $form_state->getStorage()['form_display'];
+    $content = $storage_form_display->get('content');
+    $pluginDefinitions = $storage_form_display->get('pluginManager')->getDefinitions();
+    $correct_widget_id = 'datetime_timestamp_no_default';
+    foreach (['publish_on' => $publishing_enabled, 'unpublish_on' => $unpublishing_enabled] as $field => $enabled) {
+      $actual_widget_id = $content[$field]['type'];
+      if ($enabled && $actual_widget_id != $correct_widget_id) {
+        drupal_set_message(t('The widget for field %field is incorrectly set to %wrong. This should be changed to %correct by an admin user via Field UI <a href="@link">content type form display</a> :not_available', [
+          '%field' => (string) $form[$field]['widget']['#title'],
+          '%correct' => (string) $pluginDefinitions[$correct_widget_id]['label'],
+          '%wrong' => (string) $pluginDefinitions[$actual_widget_id]['label'],
+          '@link' => \Drupal::moduleHandler()->moduleExists('field_ui') ? Url::fromRoute('entity.entity_form_display.node.default', ['node_type' => $type->get('type')])->toString() : '#',
+          ':not_available' => \Drupal::moduleHandler()->moduleExists('field_ui') ? '' : ('(' . t('not available') . ')'),
+        ]), 'warning', FALSE);
+      }
+    }
+  }
+}
+
+
+/**
+ * Implements hook_form_FORM_ID_alter() for media_bundle_form().
+ */
+function openy_media_scheduler_form_media_bundle_form_alter(array &$form, FormStateInterface $form_state) {
+  // Load the real code only when needed.
+  module_load_include('inc', 'openy_media_scheduler', 'openy_media_scheduler.admin');
+  _openy_media_scheduler_form_node_type_form_alter($form, $form_state);
+}
+
+/**
+ * Implements hook_entity_base_field_info().
+ */
+function openy_media_scheduler_entity_base_field_info($entity_type) {
+  if ($entity_type->id() === 'media') {
+    $fields['publish_on'] = BaseFieldDefinition::create('timestamp')
+      ->setLabel(t('Publish on'))
+      ->setDisplayOptions('form', [
+        'type' => 'datetime_timestamp_no_default',
+        'weight' => 30,
+      ])
+      ->setDisplayConfigurable('form', TRUE)
+      ->setTranslatable(TRUE)
+      ->setRevisionable(TRUE)
+      ->addConstraint('SchedulerMediaPublishOn');
+
+    $fields['unpublish_on'] = BaseFieldDefinition::create('timestamp')
+      ->setLabel(t('Unpublish on'))
+      ->setDisplayOptions('form', [
+        'type' => 'datetime_timestamp_no_default',
+        'weight' => 30,
+      ])
+      ->setDisplayConfigurable('form', TRUE)
+      ->setTranslatable(TRUE)
+      ->setRevisionable(TRUE)
+      ->addConstraint('SchedulerMediaUnpublishOn');
+
+    return $fields;
+  }
+
+}
