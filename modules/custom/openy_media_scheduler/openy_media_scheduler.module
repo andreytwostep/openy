@@ -6,10 +6,11 @@
  */
 
 use Drupal\Component\Utility\Xss;
-use Drupal\node\NodeInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\media_entity\Entity\MediaBundle;
+use Drupal\node\NodeInterface;
 use Drupal\openy_branch\Utility\UpdatesQueueProvisioner;
 
 /**
@@ -18,7 +19,7 @@ use Drupal\openy_branch\Utility\UpdatesQueueProvisioner;
 function openy_media_scheduler_form_media_form_alter(&$form, FormStateInterface $form_state) {
   if (($bundle = $form_state->getFormObject()->getEntity()->bundle()) == 'image') {
     $config = \Drupal::config('scheduler.settings');
-    $type = \Drupal::entityTypeManager()->getStorage('media_bundle')->load($bundle );
+    $type = MediaBundle::load($bundle);
     $publishing_enabled = $type->getThirdPartySetting('scheduler', 'publish_enable', $config->get('default_publish_enable'));
     $unpublishing_enabled = $type->getThirdPartySetting('scheduler', 'unpublish_enable', $config->get('default_unpublish_enable'));
 
@@ -141,7 +142,6 @@ function openy_media_scheduler_form_media_form_alter(&$form, FormStateInterface 
     }
   }
 }
-
 
 /**
  * Implements hook_form_FORM_ID_alter() for media_bundle_form().

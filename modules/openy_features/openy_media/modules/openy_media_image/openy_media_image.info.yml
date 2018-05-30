@@ -17,6 +17,7 @@ dependencies:
   - media_entity_image
   - openy_media
   - openy_media_image
+  - openy_media_scheduler
   - path
   - taxonomy
   - scheduler

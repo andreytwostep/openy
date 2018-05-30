@@ -4,6 +4,7 @@ namespace Drupal\openy_schedules\Plugin\Validation\Constraint;
 
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
+use Drupal\media_entity\Entity\MediaBundle;
 
 /**
  * Validates the SchedulerMediaUnpublishOn constraint.
@@ -15,7 +16,7 @@ class SchedulerMediaUnpublishOnConstraintValidator extends ConstraintValidator {
    */
   public function validate($entity, Constraint $constraint) {
     $default_unpublish_required = \Drupal::config('scheduler.settings')->get('default_unpublish_required');
-    $image = \Drupal::entityTypeManager()->getStorage('media_bundle')->load($entity->getEntity()->bundle());
+    $image = MediaBundle::load($entity->getEntity()->bundle());
     $scheduler_unpublish_required = $image->getThirdPartySetting('scheduler', 'unpublish_required', $default_unpublish_required);
     $publish_on = $entity->getEntity()->publish_on->value;
     $unpublish_on = $entity->value;
